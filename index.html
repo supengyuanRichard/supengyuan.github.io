@@ -62,6 +62,78 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-单元测试（CI）常见问题" class="article article-type-post" itemscope="" itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/12/26/单元测试（CI）常见问题/" class="article-date">
+  <time datetime="2018-12-26T03:22:13.000Z" itemprop="datePublished">2018-12-26</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/12/26/单元测试（CI）常见问题/">spring MVC中mockito的使用</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>spring MVC中mockito的使用<br>mock的作用：</p>
+<p>1.仿造 dependency 对象／接口<br>2.精确控制 dependencies 的行为，测试对应逻辑</p>
+<p>注解方式：</p>
+<p>@InjctMocks 和 @Mock 两个注解的作用：</p>
+<p>@InjectMocks在init时会扫描带有@Mock注解的bean并注入到带有@InjectMocks的对象中，使用时需要初始化</p>
+<p>eg：</p>
+<p>@Before<br>public void setUp() {<br>    MockitoAnnotations.initMocks(this);<br>}</p>
+<p>但该方式只适用于A依赖B的情况，将B mock成B’，如果A依赖B，B依赖C，C依赖D，想mock D时注解的方式不生效</p>
+<p>此时引出了另一种方式：</p>
+<p>思想：直接用一个mock bean的专用配置文件代替之前的bean，直接@Autowired注入，设置优先级primary=“true”</p>
+<bean id="mockedUaHttpService" class="org.mockito.Mockito" factory-method="mock" primary="true"><br>    <constructor-arg value="com.vipkid.neo.http.UAHttpService"><br></constructor-arg></bean>
+
+<p>@Autowired</p>
+<p>当属性名为private UaHttpService mockedUaHttpService 会优先适配这个bean，接着在下文中写mock语句</p>
+<p>并在基类引用这个配置文件</p>
+<p>这样就可以实现</p>
+<p>A依赖B，B依赖C，C依赖D，直接mock D</p>
+<p>扩展：mokitio的原理探究</p>
+<p>Mockito使用Cglib模拟真实方法，检测被mock的类，其中方法用空实现替换，返回我们想注入的值，</p>
+<p>因为java的类是在运行时动态加载的，Cglib利用这一特性可以向已经运行的java程序添加新类。</p>
+<p>1.cglib的BeanGenerator类动态创建bean，下面的配置利用反射可以根据原类生成一个代理bean：</p>
+<bean id="mockedUaHttpService" class="org.mockito.Mockito" factory-method="mock" primary="true"><br>    <constructor-arg value="com.vipkid.neo.http.UAHttpService"><br></constructor-arg></bean>
+
+<p>代码如下：</p>
+<p>BeanGenerator beanGenerator = new BeanGenerator();<br>//根据传入的参数创建一个cglib bean<br>Object myBean = beanGenerator.create();<br>create()的核心实现方法是createHelper()<br>private Object createHelper() {<br>    if (superclass != null) {<br>        setNamePrefix(superclass.getName());<br> }<br>String superName = (superclass != null) ? superclass.getName() : “java.lang.Object”;<br>Object key = KEY_FACTORY.newInstance(superName, props);<br>return super.create(key);<br>}<br>感兴趣的同学可以看看org.mockito.cglib.beans.BeanGenerator源码。</p>
+<p>Cglib中还有一个核心实现类Enhancer，下面看这个例子：<br>假设我们有一个PersonService类，它有两个方法：<br>public class PersonService {<br>    public String sayHello(String name) {<br>        return “Hello “ + name;<br>    }</p>
+<pre><code>public Integer lengthOfName(String name) {
+    return name.length();
+}
+</code></pre><p>}<br>第一个方法返回String，第二个方法返回Integer<br>Enhancer enhancer = new Enhancer();<br>enhancer.setSuperclass(PersonService.class);<br>//MethodInterceptor 接口拦截对代理的所有调用，并决定是要进行特定调用还是从超类执行方法<br>enhancer.setCallback((MethodInterceptor) (obj, method, args, proxy) -&gt; {<br>    if (method.getDeclaringClass() != Object.class &amp;&amp; method.getReturnType() == String.class) {<br>        return “Hello Tom!”;<br>    } else {<br>        return proxy.invokeSuper(obj, args);<br>    }<br>});</p>
+<p>PersonService proxy = (PersonService) enhancer.create();<br>assertEquals(“Hello Tom!”, proxy.sayHello(null));<br>int lengthOfName = proxy.lengthOfName(“Mary”);<br>assertEquals(4, lengthOfName);<br>当方法签名不是来自Object类时，我们正在拦截所有调用，这意味着不会截获toString（）或hashCode（）方法。除此之外，我们只拦截返回String的PersonService中的方法。不会拦截对lengthOfName()方法的调用，因为它的返回类型是Integer。<br>参考源码org.mockito.cglib.proxy.Enhancer</p>
+<p>mokito中的when().thenReturn()语句利用了上述特性在thenReturn()设置了我们想返回的值并在when()中设置特定调用，即那些被mock的bean。</p>
+<p><img src="file:///C:/Users/supengyuan/Desktop/image2018-11-6 17_1_41.png" alt=""></p>
+<p>参考文献：</p>
+<p><a href="https://www.petrikainulainen.net/programming/spring-framework/unit-testing-of-spring-mvc-controllers-configuration/" target="_blank" rel="noopener">https://www.petrikainulainen.net/programming/spring-framework/unit-testing-of-spring-mvc-controllers-configuration/</a></p>
+<p><a href="https://www.baeldung.com/cglib" target="_blank" rel="noopener">https://www.baeldung.com/cglib</a></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://yoursite.com/2018/12/26/单元测试（CI）常见问题/" data-id="cjq4z4raz00000wgogtowf2r3" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-一次mysql死锁的分享" class="article article-type-post" itemscope="" itemprop="blogPost">
   <div class="article-meta">
     <a href="/2018/12/24/一次mysql死锁的分享/" class="article-date">
@@ -111,7 +183,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://yoursite.com/2018/12/24/一次mysql死锁的分享/" data-id="cjq3eyffz0002q0gon068ha63" class="article-share-link">Share</a>
+      <a data-url="http://yoursite.com/2018/12/24/一次mysql死锁的分享/" data-id="cjq4z4rbo00030wgo0ej7p6il" class="article-share-link">Share</a>
       
       
     </footer>
@@ -148,7 +220,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://yoursite.com/2018/12/17/sqlsession原理分析/" data-id="cjq3eyffi0000q0gokapqzkgc" class="article-share-link">Share</a>
+      <a data-url="http://yoursite.com/2018/12/17/sqlsession原理分析/" data-id="cjq4z4rbm00020wgo4cdljz65" class="article-share-link">Share</a>
       
       
     </footer>
@@ -193,7 +265,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://yoursite.com/2018/12/06/hello-world/" data-id="cjq3eyffn0001q0goqw3qb690" class="article-share-link">Share</a>
+      <a data-url="http://yoursite.com/2018/12/06/hello-world/" data-id="cjq4z4rb600010wgoqkbzutt8" class="article-share-link">Share</a>
       
       
     </footer>
@@ -232,6 +304,10 @@
     <h3 class="widget-title">Recent Posts</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/12/26/单元测试（CI）常见问题/">spring MVC中mockito的使用</a>
+          </li>
         
           <li>
             <a href="/2018/12/24/一次mysql死锁的分享/">一次mysql死锁的分享</a>
